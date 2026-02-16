@@ -7,6 +7,29 @@ When a user reads files from the mounted path with normal CLI tools (`cat`,
 `grep`, `awk`, `jq`, etc.), they only see rows they are allowed to read.
 Unauthorized rows are omitted, not redacted.
 
+## Simple example
+
+Input JSONL:
+
+```json
+{"metric_row_id":"1","value":10}
+{"metric_row_id":"2","value":20}
+{"metric_row_id":"3","value":30}
+```
+
+If the subject can read rows `1` and `3`, then:
+
+```bash
+cat /mnt/metrics/orders.jsonl
+```
+
+returns:
+
+```json
+{"metric_row_id":"1","value":10}
+{"metric_row_id":"3","value":30}
+```
+
 ## Why this exists
 
 - Keep the AI/tooling workflow simple: use files + shell tools.
@@ -313,8 +336,29 @@ Run `metricfs` against live SpiceDB:
   --missing-resource-key deny
 ```
 
-Expected visible OpenLineage rows for `user:alice`: `ol_1`, `ol_3`, and `ol_4`
-(transitive inheritance and job facets fallback), while `ol_2` remains hidden.
+Expected visible OpenLineage rows for `user:alice`: `ol_1_job_allowed`,
+`ol_3_job_allowed_via_normalize`, and `ol_4_facets_job_only`
+(transitive inheritance and job facets fallback), while `ol_2_denied` remains
+hidden.
+
+## Throughput benchmark (SpiceDB)
+
+Measured with live SpiceDB checks and a transitive chain:
+
+- Chain: `user:alice -> orb:data_eng -> org:acme -> namespace:acme -> job:prod/airflow/daily_etl`
+- Workload: `300,000` OpenLineage rows (alternating allow/deny jobs)
+- Input size: `39,488,895` bytes (~`37.7 MiB`)
+- Visible rows: `150,000`
+
+`metricfs render --auth-backend spicedb` results:
+
+- Run 1: `27.66 MB/s`
+- Run 2: `59.43 MB/s`
+- Run 3: `59.58 MB/s`
+- Run 4: `54.28 MB/s`
+- Run 5: `59.57 MB/s`
+
+This exceeds the MVP gate in the spec (`p50 >= 15 MB/s`, `p95 >= 10 MB/s`).
 
 Compose option (SpiceDB-backed mount):
 
